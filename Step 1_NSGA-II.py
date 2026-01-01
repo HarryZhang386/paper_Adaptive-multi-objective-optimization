@@ -1,40 +1,46 @@
 """
-Step 1: NSGA-II Multi-Objective Optimization - Core Components
+Step 1: NSGA-II Multi-Objective Optimization - Core Framework
 
-This script demonstrates the core optimization framework using NSGA-II.
-Users should adapt variable definitions, constraints, and models to their research.
+This is the core optimization framework. You need to:
+1. Prepare your own trained surrogate models (XGBoost, RF, NN, etc.)
+2. Define your decision variables and their bounds
+3. Implement your specific constraint functions
+4. Set optimization directions (maximize/minimize) for each objective
+
 Repository: [https://github.com/HarryZhang386/paper_Adaptive-multi-objective-optimization.git]
 """
 
-import pandas as pd
 import numpy as np
-import xgboost as xgb
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.problem import Problem
 from pymoo.optimize import minimize
 from pymoo.termination import get_termination
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
-import warnings
-
-warnings.filterwarnings('ignore')
 
 
 # ==================================================================
-# Core Optimization Problem Definition
+# CORE: Multi-Objective Problem Definition
 # ==================================================================
-class MultiObjectiveProblem(Problem):
+class OptimizationProblem(Problem):
     """
-    Multi-objective optimization problem using surrogate models.
+    Define your multi-objective optimization problem here.
 
-    Parameters:
-        models: List of trained prediction models
-        base_values: Baseline variable values (numpy array)
-        bounds: (lower_bounds, upper_bounds) tuple
-        directions: List of 1 (maximize) or -1 (minimize) for each objective
+    Key components to customize:
+    - self.models: Your trained surrogate models (must have .predict() method)
+    - self.directions: [1, -1, 1, ...] where 1=maximize, -1=minimize
+    - _is_feasible(): Implement your domain-specific constraints
     """
 
     def __init__(self, models, base_values, bounds, directions):
+        """
+        Parameters:
+            models: List of trained prediction models
+            base_values: Baseline values for decision variables (numpy array)
+            bounds: (lower_bounds, upper_bounds) tuple
+            directions: Optimization direction for each objective
+                       1 = maximize, -1 = minimize
+        """
         self.models = models
         self.base_values = base_values
         self.directions = np.array(directions)
@@ -49,23 +55,32 @@ class MultiObjectiveProblem(Problem):
         )
 
     def _evaluate(self, X, out, *args, **kwargs):
-        """Evaluate objectives for population X."""
+        """
+        CORE EVALUATION: Use surrogate models to predict objectives.
+
+        This is the heart of the optimization - it:
+        1. Takes candidate solutions (X)
+        2. Checks feasibility using your constraints
+        3. Predicts objectives using trained models
+        4. Applies optimization directions (max/min)
+        """
         F = np.zeros((X.shape[0], self.n_obj))
 
         for i, x in enumerate(X):
-            # Apply custom constraints if needed
+            # Check if solution satisfies your constraints
             if not self._is_feasible(x):
-                F[i] = 1e6  # Penalty for infeasible solutions
+                F[i] = 1e6  # Large penalty for infeasible solutions
                 continue
 
             try:
-                # Predict using surrogate models
+                # Predict objectives using your surrogate models
                 predictions = np.array([
                     model.predict(x.reshape(1, -1))[0]
                     for model in self.models
                 ])
 
-                # Apply optimization direction
+                # Apply direction: multiply by -1 for maximization
+                # (pymoo minimizes by default)
                 F[i] = predictions * self.directions
 
             except Exception:
@@ -75,99 +90,76 @@ class MultiObjectiveProblem(Problem):
 
     def _is_feasible(self, x):
         """
-        Define custom constraints here.
-        Return True if solution is feasible, False otherwise.
+        CUSTOMIZE THIS: Implement your domain-specific constraints.
+
+        Examples of constraints you might add:
+        - Sum constraints: e.g., sum(x[0:4]) must be between [0.3, 0.9]
+        - Product constraints: e.g., x[0] * x[1] < 0.5
+        - Non-negativity: e.g., x[i] >= baseline[i] (no decrease allowed)
+        - Physical limits: e.g., density, coverage, balance requirements
+
+        Return:
+            True if solution is feasible, False otherwise
         """
-        # Example: sum constraint
-        # if not (0.3 <= np.sum(x[[0,1,3,4]]) <= 0.9):
+        # Example constraint (customize for your research):
+        # if not (0.3 <= np.sum(x[[0,1,3]]) <= 0.9):
         #     return False
 
-        return True
+        return True  # Placeholder - implement your constraints
 
 
 # ==================================================================
-# Pareto Front Filtering
+# CORE: NSGA-II Optimization Engine
 # ==================================================================
-def filter_pareto_front(X, F):
+def optimize_with_nsga2(models, x_baseline, bounds, directions,
+                        pop_size=100, n_gen=100, seed=42):
     """
-    Filter solutions to retain only non-dominated ones.
+    Run NSGA-II multi-objective optimization.
+
+    This is the main optimization function that:
+    1. Sets up the NSGA-II algorithm with genetic operators
+    2. Runs the evolutionary algorithm for specified generations
+    3. Returns Pareto-optimal solutions
 
     Parameters:
-        X: Decision variables (n_solutions × n_vars)
-        F: Objective values (n_solutions × n_objectives)
+        models: Your trained surrogate models (list)
+        x_baseline: Baseline decision variables (numpy array)
+        bounds: (lower, upper) bounds for variables
+        directions: [1/-1] for each objective (1=max, -1=min)
+        pop_size: Population size per generation
+        n_gen: Number of generations
+        seed: Random seed for reproducibility
 
     Returns:
-        X_pareto, F_pareto: Non-dominated solutions
-    """
-    n = len(F)
-    is_pareto = np.ones(n, dtype=bool)
+        X_pareto: Optimized decision variables (Pareto front)
+        F_pareto: Objective values (Pareto front)
 
-    for i in range(n):
-        if not is_pareto[i]:
-            continue
-
-        for j in range(n):
-            if i == j or not is_pareto[j]:
-                continue
-
-            # Check if i is dominated by j
-            if np.all(F[j] <= F[i]) and np.any(F[j] < F[i]):
-                is_pareto[i] = False
-                break
-
-    return X[is_pareto], F[is_pareto]
-
-
-# ==================================================================
-# NSGA-II Optimizer
-# ==================================================================
-def run_nsga2_optimization(
-        models,
-        x_baseline,
-        bounds,
-        directions,
-        pop_size=100,
-        n_generations=100,
-        crossover_prob=0.9,
-        mutation_prob=0.2,
-        seed=42
-):
-    """
-    Run NSGA-II optimization.
-
-    Parameters:
-        models: List of surrogate models
-        x_baseline: Baseline variable values
-        bounds: (lower_bounds, upper_bounds)
-        directions: [1 or -1] for each objective (1=max, -1=min)
-        pop_size: Population size
-        n_generations: Number of generations
-        crossover_prob: Crossover probability
-        mutation_prob: Mutation probability
-        seed: Random seed
-
-    Returns:
-        X_opt: Optimized decision variables (Pareto front)
-        F_opt: Objective values (Pareto front)
+    Recommended parameter tuning:
+    - For quick exploration: pop_size=50, n_gen=50
+    - For thorough search: pop_size=100-200, n_gen=100-200
+    - For complex problems: increase both proportionally
     """
     np.random.seed(seed)
 
-    # Define problem
-    problem = MultiObjectiveProblem(models, x_baseline, bounds, directions)
+    # Define the optimization problem
+    problem = OptimizationProblem(models, x_baseline, bounds, directions)
 
     # Configure NSGA-II algorithm
+    # Key genetic operators:
+    # - SBX (Simulated Binary Crossover): combines parent solutions
+    # - PM (Polynomial Mutation): introduces variation
     algorithm = NSGA2(
         pop_size=pop_size,
-        crossover=SBX(prob=crossover_prob, eta=15),
-        mutation=PM(prob=mutation_prob, eta=20),
-        eliminate_duplicates=True
+        crossover=SBX(prob=0.9, eta=15),  # 90% crossover probability
+        mutation=PM(prob=0.2, eta=20),  # 20% mutation probability
+        eliminate_duplicates=True  # Remove duplicate solutions
     )
 
     # Run optimization
     result = minimize(
         problem,
         algorithm,
-        termination=get_termination("n_gen", n_generations),
+        termination=get_termination("n_gen", n_gen),
         seed=seed,
         verbose=False
     )
@@ -175,95 +167,73 @@ def run_nsga2_optimization(
     if result.X is None:
         return None, None
 
-    # Extract Pareto solutions
-    X_pareto = result.opt.get("X")
-    F_pareto = result.opt.get("F")
+    # Extract Pareto-optimal solutions
+    X_pareto = result.opt.get("X")  # Decision variables
+    F_pareto = result.opt.get("F")  # Objective values
 
-    # Additional filtering
-    X_filtered, F_filtered = filter_pareto_front(X_pareto, F_pareto)
-
-    return X_filtered, F_filtered
+    return X_pareto, F_pareto
 
 
 # ==================================================================
-# Example Usage
+# Usage Example
 # ==================================================================
-def example_usage():
-    """Demonstration of how to use the optimization framework."""
+"""
+WORKFLOW TO USE THIS FRAMEWORK:
 
-    print("=" * 60)
-    print("NSGA-II Multi-Objective Optimization Example")
-    print("=" * 60)
+1. PREPARE YOUR DATA AND MODELS
+   - Train surrogate models (e.g., XGBoost) on your data
+   - Each model predicts one objective (UTCI, restorative potential, etc.)
 
-    # 1. Load your trained models
-    print("\n1. Loading models...")
-    models = []
-    model_files = ["model_1.json", "model_2.json", "model_3.json"]
+2. DEFINE YOUR PROBLEM
+   - Set baseline values: x_baseline = np.array([...])
+   - Set bounds: lower = x_baseline * 0.7, upper = x_baseline * 1.3
+   - Set directions: [1, -1, 1] for [max, min, max]
 
-    for path in model_files:
-        model = xgb.XGBRegressor()
-        # model.load_model(path)  # Uncomment to load actual models
-        models.append(model)
+3. IMPLEMENT CONSTRAINTS
+   - Edit _is_feasible() method in OptimizationProblem class
+   - Add your domain-specific constraints
 
-    print(f"   Loaded {len(models)} models")
+4. RUN OPTIMIZATION
+   X_opt, F_opt = optimize_with_nsga2(
+       models=your_models,
+       x_baseline=your_baseline,
+       bounds=(lower, upper),
+       directions=[1, -1, 1],
+       pop_size=100,
+       n_gen=100
+   )
 
-    # 2. Define baseline and bounds
-    print("\n2. Setting up optimization parameters...")
-    x_baseline = np.array([0.5, 0.3, 0.2, 0.4, 0.1])  # Example baseline
+5. POST-PROCESS RESULTS
+   - Convert objectives back: F_original = F_opt * directions
+   - Select solutions from Pareto front based on preferences
+   - Analyze trade-offs between objectives
 
-    # Variable bounds (±30% around baseline)
-    lower_bounds = np.maximum(0.0, x_baseline * 0.7)
-    upper_bounds = np.minimum(0.999, x_baseline * 1.3)
-    bounds = (lower_bounds, upper_bounds)
+Example code:
 
-    # Optimization directions: maximize obj1, minimize obj2, maximize obj3
-    directions = [1, -1, 1]
+    import xgboost as xgb
 
-    print(f"   Variables: {len(x_baseline)}")
-    print(f"   Objectives: {len(models)}")
+    # Load your trained models
+    models = [xgb.XGBRegressor() for _ in range(3)]
+    for i, model in enumerate(models):
+        model.load_model(f"model_{i}.json")
 
-    # 3. Run optimization
-    print("\n3. Running NSGA-II optimization...")
-    X_opt, F_opt = run_nsga2_optimization(
+    # Define baseline and bounds
+    x_baseline = np.array([0.5, 0.3, 0.2, 0.4, 0.1])
+    lower = np.maximum(0.0, x_baseline * 0.7)
+    upper = np.minimum(1.0, x_baseline * 1.3)
+
+    # Run optimization (max, min, max)
+    X_opt, F_opt = optimize_with_nsga2(
         models=models,
         x_baseline=x_baseline,
-        bounds=bounds,
-        directions=directions,
+        bounds=(lower, upper),
+        directions=[1, -1, 1],
         pop_size=100,
-        n_generations=100,
-        seed=42
+        n_gen=100
     )
 
-    if X_opt is not None:
-        print(f"   Found {len(X_opt)} Pareto-optimal solutions")
-
-        # 4. Process results
-        print("\n4. Sample results:")
-        print(f"   Decision variables shape: {X_opt.shape}")
-        print(f"   Objective values shape: {F_opt.shape}")
-
-        # Convert objectives back to original scale
-        F_original = F_opt * np.array(directions)
-
-        print("\n   First 3 solutions (objectives):")
-        for i in range(min(3, len(F_original))):
-            print(f"   Solution {i + 1}: {F_original[i]}")
-    else:
-        print("   No feasible solutions found")
-
-    print("\n" + "=" * 60)
-    print("Optimization completed")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    example_usage()
-
-    print("\n" + "=" * 60)
-    print("To use this framework:")
-    print("1. Train your surrogate models (XGBoost, etc.)")
-    print("2. Define your baseline values and bounds")
-    print("3. Set optimization directions for each objective")
-    print("4. Customize constraints in _is_feasible() method")
-    print("5. Run optimization and analyze Pareto front")
-    print("=" * 60)
+    # Results
+    print(f"Found {len(X_opt)} Pareto solutions")
+    F_original = F_opt * np.array([1, -1, 1])
+    print(f"Objective ranges: {F_original.min(axis=0)} to {F_original.max(axis=0)}")
+"""
