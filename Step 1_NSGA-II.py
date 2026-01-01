@@ -7,7 +7,7 @@ This is the core optimization framework. You need to:
 3. Implement your specific constraint functions
 4. Set optimization directions (maximize/minimize) for each objective
 
-Repository: [https://github.com/HarryZhang386/paper_Adaptive-multi-objective-optimization.git]
+Repository: [https://github.com/HarryZhangnus/paper_Adaptive-multi-objective-optimization.git]
 """
 
 import numpy as np
@@ -237,3 +237,4 @@ Example code:
     F_original = F_opt * np.array([1, -1, 1])
     print(f"Objective ranges: {F_original.min(axis=0)} to {F_original.max(axis=0)}")
 """
+
