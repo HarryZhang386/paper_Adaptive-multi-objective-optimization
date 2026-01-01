@@ -10,7 +10,7 @@ You need to:
 3. Tune the steepness parameter for weight function
 4. Apply weights to select optimization solutions
 
-Repository: [https://github.com/HarryZhang386/paper_Adaptive-multi-objective-optimization.git]
+Repository: [https://github.com/HarryZhangnus/paper_Adaptive-multi-objective-optimization.git]
 """
 
 import numpy as np
