@@ -126,7 +126,9 @@ You need to customize:
 If you use this code in your research, please cite:
 
 ```
-[Paper citation to be added upon publication]
+Zhang, X., Jia, W., Diao, H., Chen, T., Zhang, Z., Shengwei, E., & Wu, Z. (2026). Adaptive multi-objective optimization of thermal and perceptual livability in high-density residential environments using image-based spatial metrics. Building and Environment, 292(March 2026), 114307. https://doi.org/10.1016/j.buildenv.2026.114307
+
+
 ```
 
 ## License
